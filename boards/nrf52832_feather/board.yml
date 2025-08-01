@@ -1,0 +1,6 @@
+board:
+  name: nrf52832_feather
+  full_name: nRF52832-feather
+  vendor: makerdiary
+  socs:
+  - name: nrf52832
