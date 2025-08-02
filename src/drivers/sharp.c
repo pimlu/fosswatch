@@ -11,8 +11,8 @@ LOG_MODULE_REGISTER(sharp, LOG_LEVEL_DBG);
 #define SPIOP      SPI_WORD_SET(8) | SPI_TRANSFER_MSB
 
 struct spi_dt_spec spispec = SPI_DT_SPEC_GET(DT_NODELABEL(gendev), SPIOP, 0);
+struct gpio_dt_spec spicsspec = SPI_CS_GPIOS_DT_SPEC_GET(DT_NODELABEL(gendev));
 
-#if ENABLE_SHARP
 
 static const uint8_t revTable[] = {
   0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0, 
@@ -40,7 +40,14 @@ uint8_t rev(uint8_t byte) {
 
 
 int spi_sharp_init() {
-	return spi_is_ready_dt(&spispec);
+	if (!spi_is_ready_dt(&spispec)) {
+        return -1;
+    }
+	if (!device_is_ready(spicsspec.port)){
+        return -2;
+    }
+    
+    return 0;
 }
 
 static uint8_t buffer[CMD_W] = {0};
@@ -61,19 +68,13 @@ void sharp_draw(bool vcom) {
         for(;;);
     } 
 
-
-    uint8_t tx_buffer = 0x88;
-    struct spi_buf tx_spi_buf		= {.buf = (void *)&tx_buffer, .len = 1};
+    struct spi_buf tx_spi_buf		= {.buf = buffer, .len = CMD_W};
     struct spi_buf_set tx_spi_buf_set 	= {.buffers = &tx_spi_buf, .count = 1};
-    struct spi_buf rx_spi_bufs 		= {.buf = data, .len = size};
-    struct spi_buf_set rx_spi_buf_set	= {.buffers = &rx_spi_bufs, .count = 1};
 
-
-    int err = spi_write_dt(&spispec, &tx_spi_buf_set, &rx_spi_buf_set);
+    int err = spi_write_dt(&spispec, &tx_spi_buf_set);
     if (err < 0) {
         LOG_ERR("spi_write_dt() failed, err: %d", err);
         for(;;);
     }
 }
 
-#endif

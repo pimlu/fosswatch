@@ -40,7 +40,7 @@ int main(void)
 	}
 
 	ret = spi_sharp_init();
-	if (!ret) {
+	if (ret < 0) {
         LOG_ERR("spi_sharp_init failed: %d\n", ret);
 		return 0;
 	}
