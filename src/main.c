@@ -7,6 +7,11 @@
 #include <stdio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/logging/log.h>
+
+#include "drivers/sharp.h"
+
+LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 /* 1000 msec = 1 sec */
 #define SLEEP_TIME_MS   1000
@@ -34,11 +39,18 @@ int main(void)
 		return 0;
 	}
 
+	ret = spi_sharp_init();
+	if (!ret) {
+        LOG_ERR("spi_sharp_init failed: %d\n", ret);
+		return 0;
+	}
+
 	while (1) {
 		ret = gpio_pin_toggle_dt(&led);
 		if (ret < 0) {
 			return 0;
 		}
+		sharp_draw(led_state);
 
 		led_state = !led_state;
 		printf("LED state: %s\n", led_state ? "ON" : "OFF");

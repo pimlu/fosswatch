@@ -1,0 +1,23 @@
+#pragma once
+
+#include <stdio.h>
+
+
+#include <zephyr/drivers/spi.h>
+
+#define SHARP_H 168
+#define SHARP_W 144
+
+#define SHARP_ROW_W (SHARP_W/8)
+#define SHARP_PIXELS (SHARP_H * SHARP_ROW_W)
+
+// https://www.sharpsde.com/fileadmin/products/Displays/2016_SDE_App_Note_for_Memory_LCD_programming_V1.3.pdf
+
+#define CMD_LINE_W (1 + SHARP_ROW_W + 1)
+
+#define CMD_ROW_W (1 + CMD_LINE_W + 1)
+#define CMD_W (1 + SHARP_H * CMD_LINE_W + 1)
+
+int spi_sharp_init();
+
+void sharp_draw(bool vcom);
