@@ -3,7 +3,7 @@
 &spi1 {
         compatible = "nordic,nrf-spi";
         status = "okay";
-        cs-gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
+        cs-gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
         pinctrl-0 = <&spi1_default>;
         pinctrl-1 = <&spi1_sleep>;
         pinctrl-names = "default", "sleep";
@@ -12,7 +12,6 @@
                 reg = <0>;
                 spi-max-frequency = <1000000>;
                 label = "GenDev";
-                spi-cpha; /* mode 1: CPOL=0 (default), CPHA=1 */ 
         };
 };
 
