@@ -10,11 +10,33 @@
 #include <zephyr/logging/log.h>
 
 #include "drivers/sharp.h"
+#include "watch_face.h"
+
+
+
+// I will express a view on minimal features here:
+
+// I think we should have 5 buttons 
+
+// One watchface whatever that looks like
+// Forward back to switch applications. 
+// Select/ Start button
+// "Exit"
+// Multipurpose
+
+// Three applications
+// Watchface 
+// - Running Activity, Elapsed Time, Elapsed distance, Current and Average Pace
+// - Music, Play Pause, Skip
+// Keep a state "which app is displayed" 
+
+
+
 
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 /* 1000 msec = 1 sec */
-#define SLEEP_TIME_MS   1000
+#define SLEEP_TIME_MS  0
 
 /* The devicetree node identifier for the "led0" alias. */
 #define LED0_NODE DT_ALIAS(led0)
@@ -50,7 +72,9 @@ int main(void)
 		if (ret < 0) {
 			return 0;
 		}
-		sharp_draw(led_state);
+		
+		render_watch_screen();
+		sharp_draw();
 
 		led_state = !led_state;
 		printf("LED state: %s\n", led_state ? "ON" : "OFF");
