@@ -1,0 +1,11 @@
+{
+    "configurations": [
+        {
+            "name": "Zephyr",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${userHome}/v3.0.2/zephyr/include"
+            ]
+        }
+    ]
+}

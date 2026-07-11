@@ -1,5 +1,7 @@
 #include "graphics.h"
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
 #include "font.h"
 #include "drivers/sharp.h"
@@ -36,10 +38,15 @@ void drawDigit(int x0, int y0, uint8_t digit, uint8_t scale){
 }
 
 /*
-Draws a digit 0 through 9, or :, . or space at the specified coords;
+Draws a character athe specified coords;
 */
 
 void drawChar(int x0, int y0, char ch, uint8_t scale){
+    // Handle characters that might not be in font - show as space or placeholder
+    // NMEA sentences use: $, *, comma, period, letters, numbers
+    // If font[ch] is 0 (empty), it means the character isn't defined
+    // For now, we'll try to render it anyway - if it's empty, nothing will show
+    
     for(int i = 0; i< FONT_HEIGHT * scale; i++){
         uint8_t real_i = i / scale;
         for(int j = 0; j< FONT_WIDTH* scale; j++){
@@ -71,4 +78,37 @@ void drawText(char* str, uint8_t x0, uint8_t y0, uint8_t scale){
         drawChar(x0 + i * ( FONT_WIDTH + 1) * scale, y0, str[i], scale);
     }
 
+}
+
+void drawFloat(float value, int decimals, uint8_t x0, uint8_t y0, uint8_t scale) {
+    // Handle negative numbers
+    if (value < 0) {
+        drawChar(x0, y0, '-', scale);
+        x0 += (FONT_WIDTH + 1) * scale;
+        value = -value;
+    }
+    
+    // Extract integer and fractional parts
+    int int_part = (int)value;
+    float frac_part = value - int_part;
+    
+    // Print integer part
+    char int_str[16];
+    snprintf(int_str, sizeof(int_str), "%d", int_part);
+    drawText(int_str, x0, y0, scale);
+    x0 += strlen(int_str) * (FONT_WIDTH + 1) * scale;
+    
+    // Print decimal point
+    if (decimals > 0) {
+        drawDigit(x0, y0, POINT, scale);
+        x0 += (FONT_WIDTH + 1) * scale;
+        
+        // Print fractional part
+        for (int i = 0; i < decimals; i++) {
+            frac_part *= 10;
+            int digit = (int)frac_part % 10;
+            drawDigit(x0, y0, digit, scale);
+            x0 += (FONT_WIDTH + 1) * scale;
+        }
+    }
 }

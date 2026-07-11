@@ -17,3 +17,5 @@ void drawTime( uint8_t hh, uint8_t mm, uint8_t ss, uint8_t x0, uint8_t y0, uint8
 void drawText(char* str, uint8_t x0, uint8_t x1, uint8_t scale);
 
 void drawChar(int x0, int y0, char ch, uint8_t scale);
+
+void drawFloat(float value, int decimals, uint8_t x0, uint8_t y0, uint8_t scale);

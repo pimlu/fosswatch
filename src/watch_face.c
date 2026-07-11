@@ -1,9 +1,22 @@
 #include <stdint.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 #include "watch_face.h"
 #include "drivers/sharp.h"
 #include "graphics.h"
+#include "font.h"
+#include "drivers/gps.h"
+#include <zephyr/logging/log.h>
+#include <zephyr/kernel.h>
+LOG_MODULE_REGISTER(watch_face, LOG_LEVEL_DBG);
+
+bool gngga_displayed = false;
 
 void render_watch_screen(){
+    printk("TEST!");
+    LOG_INF("render watch screen");
+    printf("render_watch_screen\n");
     clear_screen();
     drawText("FOSS-WATCH", 0, 0, 2);
 
@@ -41,4 +54,74 @@ void render_watch_screen(){
    
     drawTime(hours, minutes, seconds,  0, 140, 2);
     
+    // Display GPS coordinates with debug info
+    gps_coords_t coords = gps_get_coords();
+    if (coords.valid) {
+        drawText("Lat:", 0, 100, 1);
+        drawFloat(coords.latitude, 4, 30, 100, 1);
+        
+        drawText("Lon:", 0, 110, 1);
+        drawFloat(coords.longitude, 4, 30, 110, 1);
+    } else {
+        // Show detailed debug info
+        char debug_buf[32];
+        if (!coords.i2c_ok) {
+            snprintf(debug_buf, sizeof(debug_buf), "I2C err:%d", coords.i2c_error);
+            drawText(debug_buf, 0, 100, 1);
+        } else if (!coords.data_received) {
+            snprintf(debug_buf, sizeof(debug_buf), "No data err:%d", coords.i2c_error);
+            drawText(debug_buf, 0, 100, 1);
+            snprintf(debug_buf, sizeof(debug_buf), "Bytes:%d nz:%d", 
+                    coords.bytes_received, coords.nonzero_bytes);
+            drawText(debug_buf, 0, 110, 1);
+        } else {
+            drawText("GPS: No fix", 0, 100, 1);
+            // Show fix quality and satellite count
+            char status_buf[32];
+            if (coords.fix_quality >= 0) {
+                snprintf(status_buf, sizeof(status_buf), "Q:%d Sats:%d", 
+                        coords.fix_quality, coords.num_satellites);
+                drawText(status_buf, 0, 110, 1);
+                
+                // Show full NMEA sentence if available (split across multiple lines)
+                if (coords.last_sentence[0] != '\0') {
+                    int len = strlen(coords.last_sentence);
+                    // Display up to 23 chars per line (144px / 6px per char, leave some margin)
+                    int chars_per_line = 23;
+                    int y_pos = 120;
+                    int line = 0;
+                    
+                    // Display sentence across multiple lines
+                    for (int i = 0; i < len && line < 3; i += chars_per_line) {
+                        char line_buf[24];
+                        int remaining = len - i;
+                        int copy_len = (remaining < chars_per_line) ? remaining : chars_per_line;
+                        strncpy(line_buf, &coords.last_sentence[i], copy_len);
+                        line_buf[copy_len] = '\0';
+                        drawText(line_buf, 0, y_pos + (line * 10), 1);
+                        line++;
+                    }
+                }
+            } else if (coords.last_sentence[0] != '\0') {
+                // Show sentence type if no quality info yet
+                char sentence_type[8] = {0};
+                int len = strlen(coords.last_sentence);
+                int copy_len = (len < 7) ? len : 7;
+                strncpy(sentence_type, coords.last_sentence, copy_len);
+                sentence_type[copy_len] = '\0';
+                drawText(sentence_type, 0, 110, 1);
+            } else {
+                drawText("Waiting...", 0, 110, 1);
+            }
+        }
+    }
+
+    // Only freeze if we have a valid fix with both coordinates
+    if (!gngga_displayed && coords.valid && 
+        coords.fix_quality > 0 && 
+        coords.latitude != 0.0f && coords.longitude != 0.0f) {
+        gngga_displayed = true;
+        // Sleep for 5 minutes to keep the screen frozen
+        k_msleep(5 * 60 * 1000);
+    }
 }
