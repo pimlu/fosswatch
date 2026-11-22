@@ -49,8 +49,6 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
  */
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
 
-extern bool gngga_displayed;
-
 int main(void)
 {
 	int ret;
@@ -112,10 +110,6 @@ int main(void)
 		led_state = !led_state;
 		printf("LED state: %s\n", led_state ? "ON" : "OFF");
 		k_msleep(SLEEP_TIME_MS);
-		
-		if(gngga_displayed) {
-			k_msleep(5 * 60 * 1000);
-		}
 	}
 	return 0;
 }

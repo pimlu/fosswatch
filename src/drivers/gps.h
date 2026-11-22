@@ -20,9 +20,17 @@ typedef struct {
     char last_sentence[80]; // Last NMEA sentence received (full sentence)
     int fix_quality;       // GPS fix quality (0=no fix, 1=GPS, 2=DGPS, etc.)
     int num_satellites;    // Number of satellites in view
+    bool time_valid;       // true once we've parsed a UTC time from the GPS
+    int utc_hours;         // UTC time-of-day reported by the GPS
+    int utc_minutes;
+    int utc_seconds;
+    bool date_valid;       // true once we've parsed a UTC date (from RMC)
+    int utc_day;           // UTC calendar date reported by the GPS (RMC)
+    int utc_month;         // 1-12
+    int utc_year;          // full year, e.g. 2026
 } gps_coords_t;
 
-// Initialize GPS module
+// Initialize GPS module and start the background polling thread
 int gps_init(void);
 
 // Get current GPS coordinates (parses NMEA sentences)

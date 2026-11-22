@@ -10,7 +10,23 @@ static const struct device *i2c_bus = DEVICE_DT_GET(GPS_I2C_BUS);
 static const uint16_t gps_addr = GPS_I2C_ADDR;
 static char nmea_buffer[90];  // NMEA sentences are typically 70-80 chars
 static int nmea_buffer_pos = 0;
-static gps_coords_t last_coords = {0.0f, 0.0f, false, false, false, 0, 0, 0, "", 0, 0};
+
+// Working state, only ever touched by the GPS polling thread.
+static gps_coords_t last_coords = {0};
+
+// Snapshot handed off to the display. gps_get_coords() reads this without
+// touching the I2C bus, so the render loop can never block on the GPS.
+static gps_coords_t shared_coords = {0};
+K_MUTEX_DEFINE(gps_mutex);
+
+// Background polling thread: drains and parses the GPS off the render path.
+#define GPS_THREAD_STACK_SIZE 2048
+#define GPS_THREAD_PRIORITY   7
+#define GPS_POLL_INTERVAL_MS  100
+static K_THREAD_STACK_DEFINE(gps_thread_stack, GPS_THREAD_STACK_SIZE);
+static struct k_thread gps_thread_data;
+static bool gps_thread_started = false;
+static void gps_thread_fn(void *p1, void *p2, void *p3);
 
 // Helper function to check if a field is empty (matches Adafruit isEmpty)
 static bool is_empty(const char *p) {
@@ -102,7 +118,15 @@ static bool parse_nmea_gga(const char *sentence, gps_coords_t *coords) {
     if (p == NULL) return false;
     p++;  // Skip to char after the comma
     
-    // Field 1: Time (skip it)
+    // Field 1: UTC time of day, formatted hhmmss.sss
+    if (!is_empty(p)) {
+        // atol stops at the '.', so "123519.00" -> 123519
+        long t = atol(p);
+        coords->utc_hours = (int)((t / 10000) % 100);
+        coords->utc_minutes = (int)((t / 100) % 100);
+        coords->utc_seconds = (int)(t % 100);
+        coords->time_valid = true;
+    }
     p = strchr(p, ',');
     if (p == NULL) return false;
     p++;
@@ -165,6 +189,47 @@ static bool parse_nmea_gga(const char *sentence, gps_coords_t *coords) {
     return true;  // Successfully parsed GGA sentence
 }
 
+// Parse the date (and time) out of an RMC sentence. GGA has no date field, so
+// RMC is the only NMEA sentence we enable that can drive the calendar display.
+// Format: $GPRMC,hhmmss.sss,A,lat,N,lon,E,spd,cog,ddmmyy,...
+static bool parse_nmea_rmc(const char *sentence, gps_coords_t *coords) {
+    if (strncmp(sentence, "$GPRMC", 6) != 0 &&
+        strncmp(sentence, "$GNRMC", 6) != 0) {
+        return false;
+    }
+
+    char sentence_copy[128];
+    strncpy(sentence_copy, sentence, sizeof(sentence_copy) - 1);
+    sentence_copy[sizeof(sentence_copy) - 1] = '\0';
+
+    // Walk to field 9 (the date), counting commas. Field 0 is the sentence type.
+    char *p = sentence_copy;
+    int field = 0;
+    while (field < 9) {
+        p = strchr(p, ',');
+        if (p == NULL) return false;
+        p++;
+        field++;
+    }
+
+    // Field 9: date formatted ddmmyy. atol stops at the trailing comma.
+    if (!is_empty(p)) {
+        long d = atol(p);
+        int day   = (int)((d / 10000) % 100);
+        int month = (int)((d / 100) % 100);
+        int year  = (int)(d % 100);
+        // Sanity-check before publishing so a corrupt line can't set a bogus date.
+        if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+            coords->utc_day = day;
+            coords->utc_month = month;
+            coords->utc_year = 2000 + year;
+            coords->date_valid = true;
+        }
+    }
+
+    return true;
+}
+
 int gps_init(void) {
     if (!device_is_ready(i2c_bus)) {
         return -1;
@@ -178,7 +243,17 @@ int gps_init(void) {
     // Set update rate to 1Hz
     gps_send_command("PMTK220,1000");
     k_msleep(100);
-    
+
+    // Spawn the background polling thread so I2C reads stay off the render loop.
+    if (!gps_thread_started) {
+        k_thread_create(&gps_thread_data, gps_thread_stack,
+                        K_THREAD_STACK_SIZEOF(gps_thread_stack),
+                        gps_thread_fn, NULL, NULL, NULL,
+                        GPS_THREAD_PRIORITY, 0, K_NO_WAIT);
+        k_thread_name_set(&gps_thread_data, "gps");
+        gps_thread_started = true;
+    }
+
     return 0;
 }
 
@@ -213,7 +288,16 @@ int gps_send_command(const char *cmd) {
     return 0;
 }
 
-gps_coords_t gps_get_coords(void) {
+// Publish the current working state to the display-facing snapshot.
+static void gps_publish(void) {
+    k_mutex_lock(&gps_mutex, K_FOREVER);
+    shared_coords = last_coords;
+    k_mutex_unlock(&gps_mutex);
+}
+
+// Perform one blocking I2C read + parse. Runs on the GPS thread only, so if
+// the bus stalls it blocks *this* thread, never the display.
+static void gps_poll(void) {
     // Check I2C bus status
     if (!device_is_ready(i2c_bus)) {
         last_coords.i2c_ok = false;
@@ -223,7 +307,8 @@ gps_coords_t gps_get_coords(void) {
         last_coords.bytes_received = 0;
         last_coords.nonzero_bytes = 0;
         last_coords.last_sentence[0] = '\0';
-        return last_coords;
+        gps_publish();
+        return;
     }
     
     last_coords.i2c_ok = true;
@@ -265,9 +350,17 @@ gps_coords_t gps_get_coords(void) {
                         // Only store valid NMEA sentences (must start with '$')
                         if (nmea_buffer[0] == '$' && nmea_buffer_pos > 5) {
                             // Check if it's a GGA sentence
-                            bool is_gga = (strncmp(nmea_buffer, "$GPGGA", 6) == 0 || 
+                            bool is_gga = (strncmp(nmea_buffer, "$GPGGA", 6) == 0 ||
                                           strncmp(nmea_buffer, "$GNGGA", 6) == 0);
-                            
+                            bool is_rmc = (strncmp(nmea_buffer, "$GPRMC", 6) == 0 ||
+                                          strncmp(nmea_buffer, "$GNRMC", 6) == 0);
+
+                            if (is_rmc) {
+                                // RMC only feeds the calendar date; leave the
+                                // fix/coordinate fields (owned by GGA) untouched.
+                                parse_nmea_rmc(nmea_buffer, &last_coords);
+                            }
+
                             if (is_gga) {
                                 // Store full sentence for debugging
                                 int sentence_len = strlen(nmea_buffer);
@@ -316,6 +409,26 @@ gps_coords_t gps_get_coords(void) {
         last_coords.bytes_received = 0;
         last_coords.nonzero_bytes = 0;
     }
-    
-    return last_coords;
+
+    gps_publish();
+}
+
+// Non-blocking accessor for the display. Just copies the latest snapshot.
+gps_coords_t gps_get_coords(void) {
+    gps_coords_t copy;
+    k_mutex_lock(&gps_mutex, K_FOREVER);
+    copy = shared_coords;
+    k_mutex_unlock(&gps_mutex);
+    return copy;
+}
+
+static void gps_thread_fn(void *p1, void *p2, void *p3) {
+    ARG_UNUSED(p1);
+    ARG_UNUSED(p2);
+    ARG_UNUSED(p3);
+
+    while (1) {
+        gps_poll();
+        k_msleep(GPS_POLL_INTERVAL_MS);
+    }
 }
